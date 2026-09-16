@@ -1,41 +1,43 @@
 # AI Requirements Collection Agent
 
-A lightweight LangGraph-based prototype for iterative software requirements collection, clarification, and readiness assessment.
+A LangGraph-based prototype for iterative software requirements elicitation, human clarification, validation, and readiness assessment during the Software Development Life Cycle (SDLC).
 
-The project explores how an LLM can assist a software requirements engineer by analyzing incomplete stakeholder ideas, identifying missing requirement areas, asking targeted clarification questions, preserving conversation context, and iteratively refining the requirements before handing them to a separate validation stage.
+The system behaves like a software requirements engineer: it analyzes an incomplete project idea, identifies missing requirement areas, asks targeted questions, preserves stakeholder responses, validates the collected requirements, and routes unresolved validation issues back to the stakeholder.
 
-## Current Status
+## Current Capabilities
 
 The prototype currently supports:
 
-* Python project structure with testing and linting
-* Pydantic schemas for structured requirements data
+* Structured requirements models using Pydantic
 * Shared LangGraph state
 * AWS Bedrock / Claude integration
-* Structured LLM output
-* Requirements analysis
-* Requirement-area coverage assessment
+* Structured LLM outputs
+* Requirements extraction
+* Stakeholder identification
+* Requirement coverage assessment
 * Assumption tracking
-* Targeted clarification-question generation
-* Human-in-the-loop clarification
-* Conversation-history preservation
-* Iterative re-analysis after stakeholder responses
-* Deterministic completeness/readiness checks
+* Targeted clarification questions
+* Human-in-the-loop interaction
+* Conversation history preservation
+* Iterative requirements analysis
+* Deterministic readiness checks
 * Maximum clarification-round protection
 * LangGraph conditional routing
-* LangGraph interrupt/resume workflow
+* `interrupt()` / `Command(resume=...)`
 * In-memory checkpointing
-* Interactive CLI demonstration
-* Unit tests with `pytest`
-* Static analysis with `ruff`
+* Dedicated requirements validation
+* Validation issue detection
+* Validation-to-clarification routing
+* Deterministic validation guardrails
+* Offline unit tests using mocked LLMs
+* Interactive CLI demo
+* `pytest` and Ruff checks
 
-The project currently stops when requirements are considered ready to enter the validation stage.
-
-The dedicated validator and final requirements specification generator are the next milestones.
+The next milestone is generation of the final structured requirements specification.
 
 ---
 
-## Example Use Case
+## Example
 
 Initial stakeholder idea:
 
@@ -43,242 +45,225 @@ Initial stakeholder idea:
 Build an application where university students can reserve study rooms.
 ```
 
-The agent initially identifies confirmed information such as:
+The analyzer identifies known information and missing areas.
 
-* university students are users
-* students need to reserve study rooms
-
-It also identifies missing areas such as:
-
-* authentication
-* administrator roles
-* reservation policies
-* room attributes
-* security
-* integrations
-* non-functional requirements
-
-The agent then generates targeted clarification questions.
-
-Example:
+For example:
 
 ```text
-1. Besides students, are there other roles that interact with the system?
+Known:
+- University students are users.
+- Students need to reserve study rooms.
 
-2. How should students authenticate?
-
-3. What booking rules apply?
-
-4. What attributes describe a study room?
-
-5. Are there existing university systems that must be integrated?
+Missing:
+- Authentication
+- Administrator responsibilities
+- Booking policies
+- Room attributes
+- Security requirements
+- Integrations
+- Non-functional requirements
 ```
 
-The stakeholder provides answers.
+The system then asks targeted clarification questions.
 
-The graph stores those answers in conversation history, resumes the same workflow, and analyzes the updated requirements again.
+Stakeholder responses are saved in conversation history and the requirements are analyzed again.
 
-This continues until the deterministic readiness criteria are satisfied or the configured maximum number of clarification rounds is reached.
+Once the deterministic readiness criteria are satisfied, the collected requirements move to a separate validation stage.
 
 ---
 
 ## Current Workflow
 
-```text
-Stakeholder Idea
-      ↓
-Create Initial State
-      ↓
-Analyze Requirements
-      ↓
-Claude / AWS Bedrock
-      ↓
-Structured AnalysisResult
-      ↓
-Deterministic Completeness Check
-      ↓
- ┌───────────────────────────────┐
- │                               │
-Missing Information        Ready for Validation
- │                               │
- ▼                               ▼
-Clarification Questions    Validation Boundary
- │                               │
- ▼                               ▼
-LangGraph interrupt()            END
- │
- ▼
-Human Response
- │
- ▼
-Command(resume=...)
- │
- ▼
-Conversation State Restored
- │
- ▼
-Analyze Again
-```
-
----
-
-## Architecture
-
 ```mermaid
 flowchart TD
-    A[Stakeholder Idea] --> B[Create Initial State]
-    B --> C[Analyze Requirements]
+    A[Stakeholder Idea] --> B[Analyze Requirements]
 
-    C --> D[Claude via AWS Bedrock]
-    D --> E[Structured Analysis Result]
+    B --> C[Structured Analysis Result]
 
-    E --> F[Deterministic Completeness Check]
+    C --> D[Deterministic Completeness Check]
 
-    F -->|Missing Information| G[Clarification Questions]
+    D -->|Missing Information| E[Clarification Questions]
 
-    G --> H[LangGraph Interrupt]
-    H --> I[Human Response]
-    I --> J[Resume Same Thread]
-    J --> C
+    E --> F[LangGraph Interrupt]
+    F --> G[Human Response]
+    G --> H[Resume Same Thread]
+    H --> B
 
-    F -->|Ready| K[Validation Ready]
-    K --> L[END]
+    D -->|Ready for Validation| I[Validate Requirements]
 
-    L -. Next Milestone .-> M[Requirements Validator]
+    I --> J{Validation Passed?}
+
+    J -->|No| E
+    J -->|Yes| K[End - Ready for Final Specification]
 ```
 
 ---
 
-## Design Principles
+## Architecture Principles
 
-The prototype intentionally separates LLM reasoning from workflow control.
+### Separate elicitation from validation
 
-### 1. The LLM does not control completion
+The requirements analyzer answers:
 
-Claude performs tasks such as:
+> What information do we currently know, and what should we ask next?
 
-* requirement extraction
-* stakeholder identification
-* coverage analysis
-* assumption identification
-* clarification-question generation
+The validator answers:
 
-However, Claude does not decide when the collection process is complete.
+> Are the collected requirements consistent, unambiguous, secure, and testable?
 
-A deterministic Python rubric makes that decision.
+These are separate nodes with separate prompts and structured outputs.
+
+This prevents the same step from both generating and approving its own requirements.
 
 ---
 
-### 2. Confirmed requirements and assumptions are separated
+### The LLM does not control workflow completion
 
-The analyzer is instructed not to treat plausible ideas as confirmed requirements.
+Claude performs semantic reasoning such as:
 
-For example:
+* extracting requirements
+* identifying assumptions
+* assessing requirement coverage
+* identifying validation issues
+* generating clarification questions
+
+Python controls workflow decisions.
+
+The deterministic completeness logic decides whether requirements are ready to enter validation.
+
+The validation guardrail also requires:
 
 ```text
-Stakeholder says:
-"Students reserve rooms."
+LLM says passed
+AND
+there are zero validation issues
+```
 
-Confirmed:
-Students can reserve study rooms.
+before:
 
-Possible inference:
-Administrators may manage rooms.
-
-Correct behavior:
-Ask whether administrators exist instead of treating them as confirmed.
+```text
+validation_passed = True
 ```
 
 ---
 
-### 3. Human-in-the-loop is part of the workflow
+### Human-in-the-loop
 
-When missing information exists, the LangGraph workflow pauses using an interrupt.
+If information is missing or validation finds an issue, LangGraph pauses:
 
-The stakeholder answers the clarification questions.
+```python
+interrupt(...)
+```
 
-The same graph session is resumed using:
+The stakeholder provides an answer.
+
+The workflow resumes using:
 
 ```python
 Command(resume=response)
 ```
 
-Conversation history is preserved so the next analysis has the full context.
+The same `thread_id` allows LangGraph to restore the checkpointed conversation and continue from where it paused.
 
 ---
 
-### 4. Infinite questioning is prevented
+### Maximum clarification rounds
 
-The workflow has a configurable maximum number of clarification rounds.
+The workflow prevents infinite questioning.
 
 ```env
 MAX_CLARIFICATION_ROUNDS=3
 ```
 
-If the limit is reached, the workflow proceeds to validation rather than asking questions indefinitely.
+If the maximum is reached, the workflow stops requesting additional clarification.
 
-Reaching this limit does not imply the requirements are complete.
+Importantly, reaching the limit does **not** automatically mean validation succeeded.
 
-It means that the collection stage should stop and unresolved issues should be handled by the validation stage.
+It is possible to finish with:
+
+```text
+Ready for validation: True
+Validation passed: False
+```
+
+This means unresolved validation issues remain.
 
 ---
 
-## Deterministic Readiness Check
+## Requirements Validation
 
-The current completeness logic checks major requirement categories:
+The validator checks the collected requirements for:
 
-* actors
-* functional requirements
-* non-functional requirements
-* data
-* security
-* constraints
-* dependencies
+* missing important requirements
+* contradictions
+* ambiguous language
+* security and privacy concerns
+* undefined actors or permissions
+* incomplete functional behavior
+* missing non-functional requirements
+* unclear constraints
+* unclear dependencies
+* lack of testability
 
-The workflow can proceed toward validation when:
+Example:
 
-* no core category is completely missing
-* only a small number of clarification questions remain
+```text
+Requirement:
+"The application should be fast."
+```
 
-or when:
+The validator may identify:
 
-* the maximum clarification-round limit has been reached
+```text
+Issue Type:
+Testability
 
-This provides a deterministic guardrail around the LLM.
+Problem:
+"Fast" does not define a measurable performance target.
+
+Clarification:
+What response-time target should normal user actions meet?
+```
+
+The clarification question is routed back through the same human-in-the-loop workflow.
 
 ---
 
 ## LangGraph State
 
-The shared graph state currently contains information similar to:
+The shared graph state contains:
 
 ```text
 project_idea
 conversation_history
+
 stakeholders
 collected_requirements
 assumptions
+
 coverage
 open_questions
+
 validation_issues
+
 clarification_round
 max_clarification_rounds
+
 ready_for_validation
 validation_passed
+
 final_specification
 ```
 
-This state is shared across workflow nodes.
+Nodes read this shared state and return only the fields they need to update.
 
 ---
 
-## Structured LLM Output
+## Structured Output
 
-The LLM does not return arbitrary unvalidated JSON.
+Pydantic models are used instead of arbitrary LLM-generated JSON.
 
-Pydantic models are used for structured output.
-
-Examples include:
+Current models include:
 
 * `Stakeholder`
 * `Requirement`
@@ -289,10 +274,11 @@ Examples include:
 * `ValidationResult`
 * `FunctionalRequirement`
 * `NonFunctionalRequirement`
+* `Epic`
 * `UserStory`
 * `FinalSpecification`
 
-This improves consistency and makes the agent workflow easier to validate and test.
+This provides predictable data contracts between LLM reasoning and the workflow.
 
 ---
 
@@ -310,10 +296,12 @@ requirements-collection-agent/
 │       │   └── provider.py
 │       │
 │       ├── nodes/
-│       │   └── analyze.py
+│       │   ├── analyze.py
+│       │   └── validate.py
 │       │
 │       ├── prompts/
-│       │   └── analysis.py
+│       │   ├── analysis.py
+│       │   └── validation.py
 │       │
 │       ├── completeness.py
 │       ├── config.py
@@ -329,7 +317,8 @@ requirements-collection-agent/
 │   ├── test_interaction.py
 │   ├── test_schemas.py
 │   ├── test_setup.py
-│   └── test_state.py
+│   ├── test_state.py
+│   └── test_validate_node.py
 │
 ├── .env.example
 ├── .gitignore
@@ -362,7 +351,7 @@ git clone https://github.com/nithikeshreddy/requirements-collection-agent.git
 cd requirements-collection-agent
 ```
 
-Create a virtual environment:
+Create the environment:
 
 ```bash
 python3.11 -m venv .venv
@@ -375,7 +364,7 @@ Install dependencies:
 pip install -e ".[dev]"
 ```
 
-Create the local environment file:
+Create local configuration:
 
 ```bash
 cp .env.example .env
@@ -391,35 +380,9 @@ MAX_CLARIFICATION_ROUNDS=3
 LOG_LEVEL=INFO
 ```
 
-Configure a Bedrock model available in your AWS account.
-
----
-
-## AWS Authentication
-
 AWS credentials are not stored in this repository.
 
-The application uses the normal AWS credential chain.
-
-Possible authentication methods include:
-
-* AWS CLI credentials
-* AWS CLI profiles
-* AWS SSO
-* environment-based credentials
-* IAM roles in a deployed environment
-
-Do not commit:
-
-```text
-.env
-AWS access keys
-AWS secret keys
-AWS session tokens
-credential files
-```
-
-The `.env` file is ignored by Git.
+The application uses the normal AWS credential chain, such as AWS CLI credentials, AWS profiles, AWS SSO, or IAM roles.
 
 ---
 
@@ -429,95 +392,55 @@ The `.env` file is ignored by Git.
 python -m pytest -q
 ```
 
-Current test status:
-
-```text
-17 passed
-```
-
 Run linting:
 
 ```bash
 ruff check .
 ```
 
-Expected:
+Both should complete successfully before changes are committed.
 
-```text
-All checks passed!
-```
+The graph and validator tests use mocked LLM behavior, so unit tests do not require Bedrock API calls.
 
 ---
 
 ## Run the Interactive Demo
 
-Run:
-
 ```bash
 python examples/run_collection.py
 ```
 
-The application begins with the example:
+The graph starts from:
 
 ```text
 Build an application where university students can reserve study rooms.
 ```
 
-The graph analyzes the idea and displays clarification questions:
+It analyzes the idea and may pause with:
 
 ```text
 Clarification Round 1
 
-1. Besides students, who else interacts with the system?
-2. What additional reservation actions are required?
-3. How should students authenticate?
-4. What booking rules apply?
-5. Are there technical or integration constraints?
+1. ...
+2. ...
+3. ...
 
 Stakeholder:
 ```
 
-Enter answers in one response.
+After answering, LangGraph resumes the same checkpointed thread and analyzes the new information.
 
-The graph resumes the same conversation and analyzes the updated requirements.
-
-If additional information is needed, another clarification round is generated.
-
-Example:
+The cycle can continue through:
 
 ```text
-Clarification Round 2
-...
+Analyze
+→ Clarify
+→ Analyze
+→ Completeness Check
+→ Validate
+→ Clarify if needed
+→ Validate again
 ```
-
-Once the deterministic readiness criteria are satisfied:
-
-```text
-Requirements collection finished.
-Ready for validation: True
-```
-
-`Ready for validation: True` does not mean that the requirements have passed validation.
-
-It means that the requirements collection stage has enough information to attempt the separate validation stage.
-
----
-
-## Why LangGraph?
-
-The workflow contains:
-
-* mutable shared state
-* iterative analysis
-* conditional routing
-* loops
-* human interaction
-* pause/resume behavior
-* checkpointing
-
-This makes the problem naturally graph-oriented.
-
-LangGraph allows the workflow to pause when human clarification is required and later resume the same session while preserving the conversation state.
 
 ---
 
@@ -526,69 +449,66 @@ LangGraph allows the workflow to pause when human clarification is required and 
 ### Milestone 1 — Project Setup
 
 * [x] Repository structure
-* [x] Python virtual environment
-* [x] `pyproject.toml`
+* [x] Python environment
 * [x] pytest
 * [x] Ruff
-* [x] environment-variable configuration
+* [x] environment configuration
 
 ### Milestone 2 — Schemas and State
 
-* [x] Pydantic models
-* [x] Requirement categories
-* [x] Coverage model
-* [x] Validation schemas
-* [x] Final specification schemas
+* [x] Pydantic schemas
 * [x] LangGraph shared state
-* [x] Conversation history
+* [x] conversation history
+* [x] validation schemas
+* [x] final specification schemas
 
 ### Milestone 3 — Requirements Analysis
 
-* [x] AWS Bedrock integration
-* [x] Claude requirements analyzer
-* [x] Structured output
-* [x] Stakeholder extraction
-* [x] Requirement extraction
-* [x] Coverage analysis
-* [x] Assumption tracking
-* [x] Clarification-question generation
+* [x] AWS Bedrock / Claude integration
+* [x] structured requirements extraction
+* [x] stakeholder extraction
+* [x] coverage analysis
+* [x] assumption tracking
+* [x] clarification generation
 
 ### Milestone 4 — Human Clarification
 
-* [x] Human clarification responses
-* [x] Conversation-history updates
-* [x] Clarification-round tracking
-* [x] Iterative re-analysis
+* [x] stakeholder responses
+* [x] conversation-history updates
+* [x] iterative re-analysis
+* [x] clarification-round tracking
 
 ### Milestone 5 — LangGraph Workflow
 
-* [x] Deterministic readiness rubric
-* [x] Conditional routing
-* [x] Clarification loop
+* [x] deterministic readiness logic
+* [x] conditional routing
+* [x] clarification loop
+* [x] checkpointing
 * [x] `interrupt()`
 * [x] `Command(resume=...)`
-* [x] checkpointed conversation threads
 * [x] maximum clarification rounds
-* [x] interactive CLI demonstration
 
-### Milestone 6 — Validation
+### Milestone 6 — Requirements Validation
 
-Next:
-
-* [ ] Requirements validator node
-* [ ] Missing-requirement detection
-* [ ] Ambiguity detection
-* [ ] Contradiction detection
-* [ ] Security review
-* [ ] Testability review
-* [ ] Validation-to-clarification routing
+* [x] dedicated validation prompt
+* [x] validator node
+* [x] structured validation results
+* [x] ambiguity detection support
+* [x] contradiction detection support
+* [x] security review support
+* [x] actor / authorization review
+* [x] testability review
+* [x] validation clarification loop
+* [x] deterministic validation guardrail
+* [x] max-round validation stopping behavior
+* [x] validator and graph unit tests
 
 ### Milestone 7 — Final Specification
 
-Planned:
+Next:
 
 * [ ] project summary
-* [ ] actors / roles
+* [ ] actors and roles
 * [ ] functional requirements
 * [ ] non-functional requirements
 * [ ] epics
@@ -597,98 +517,50 @@ Planned:
 * [ ] constraints
 * [ ] dependencies
 * [ ] open assumptions
+* [ ] structured final output
 
 ---
 
-## Planned End-to-End Workflow
+## Planned Final Workflow
 
 ```mermaid
 flowchart TD
     A[Stakeholder Idea] --> B[Analyze Requirements]
 
-    B --> C[Deterministic Completeness Check]
+    B --> C[Completeness Check]
 
-    C -->|Missing Information| D[Human Clarification]
+    C -->|Incomplete| D[Human Clarification]
     D --> B
 
-    C -->|Ready| E[Requirements Validator]
+    C -->|Ready| E[Validate Requirements]
 
     E -->|Issues Found| D
 
-    E -->|Validation Passes| F[Generate Final Specification]
+    E -->|Passed| F[Generate Final Specification]
 
     F --> G[Structured Requirements Output]
 ```
 
 ---
 
-## Future Extensions
+## Evaluation / Research Direction
 
-Possible later improvements include:
+Potential evaluation dimensions include:
 
-* Streamlit chat interface
-* persistent LangGraph checkpointing
-* Jira REST API integration
-* GitHub Issues integration
-* requirements-version tracking
-* automated evaluation
-* Docker
-* cloud deployment
-* FastAPI service
-* multi-stakeholder workflows
-
-These are intentionally outside the initial MVP.
-
----
-
-## Evaluation and Research Direction
-
-The prototype can later be evaluated scientifically across several dimensions.
-
-### Requirement Completeness
-
-Measure how many expected requirement categories are successfully discovered.
-
-### Clarification Question Relevance
-
-Evaluate whether generated questions address meaningful missing information.
-
-### Duplicate Question Rate
-
-Measure whether the system unnecessarily asks questions that were already answered.
-
-### Number of Clarification Turns
-
-Measure how efficiently the agent reaches validation readiness.
-
-### Ambiguity Detection
-
-Evaluate whether vague requirements such as:
-
-```text
-The application should be fast.
-```
-
-are correctly identified as non-testable or ambiguous.
-
-### Contradiction Detection
-
-Evaluate whether conflicting stakeholder statements are identified.
-
-### Testability
-
-Measure whether final requirements contain measurable acceptance conditions.
-
-### Structured Output Reliability
-
-Measure how often generated outputs successfully satisfy the required Pydantic schemas.
-
-### Latency and Cost
-
-Track:
-
-* Bedrock latency
-* number of LLM calls
+* requirement completeness
+* clarification-question relevance
+* duplicate-question rate
+* number of clarification turns
+* ambiguity detection
+* contradiction detection
+* security issue identification
+* requirement testability
+* validator precision and recall
+* user-story quality
+* acceptance-criteria quality
+* Pydantic schema reliability
+* latency
+* LLM calls
 * token usage
 * cost per requirements session
 
@@ -696,24 +568,20 @@ Track:
 
 ## Current Limitations
 
-This project is currently an MVP.
-
 The system does not yet:
 
-* perform the dedicated validation stage
-* detect contradictions through a validator node
-* perform formal ambiguity analysis
 * generate the final requirements specification
-* persist sessions between application restarts
-* provide a graphical UI
+* persist sessions across application restarts
+* provide a graphical interface
 * integrate with Jira
 * integrate with GitHub Issues
+* support multiple simultaneous stakeholder identities
 * provide automated research-grade evaluation metrics
 
-The current implementation focuses specifically on reliable iterative requirements collection and human-in-the-loop orchestration.
+The current MVP focuses on requirements elicitation, iterative clarification, workflow orchestration, and validation.
 
 ---
 
 ## Goal
 
-The long-term goal is to explore how agentic workflows can support requirements elicitation during the Software Development Life Cycle while keeping humans involved in important decisions and avoiding reliance on an LLM as the sole source of truth.
+The goal of this project is to explore how agentic workflows can support requirements engineering during the SDLC while keeping humans involved in important decisions and preventing the LLM from becoming the sole authority over requirements completeness or quality.
