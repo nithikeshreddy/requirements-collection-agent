@@ -10,12 +10,15 @@ from langgraph.types import interrupt
 
 from requirements_agent.completeness import requirements_ready_for_validation
 from requirements_agent.nodes.analyze import analyze_requirements
+from requirements_agent.nodes.validate import validate_requirements
 from requirements_agent.schemas import (
     CoverageAssessment,
     CoverageStatus,
     Requirement,
     RequirementCategory,
     Stakeholder,
+    ValidationIssue,
+    ValidationIssueType,
 )
 from requirements_agent.state import AgentState
 
@@ -49,7 +52,10 @@ def collect_clarification(state: AgentState) -> dict:
 
     formatted_questions = "\n".join(
         f"{index}. {question}"
-        for index, question in enumerate(state["open_questions"], start=1)
+        for index, question in enumerate(
+            state["open_questions"],
+            start=1,
+        )
     )
 
     response = interrupt(
@@ -67,24 +73,24 @@ def collect_clarification(state: AgentState) -> dict:
         "conversation_history": [
             {
                 "role": "agent",
-                "content": f"Clarification questions:\n{formatted_questions}",
+                "content": (
+                    f"Clarification questions:\n"
+                    f"{formatted_questions}"
+                ),
             },
             {
                 "role": "stakeholder",
                 "content": response.strip(),
             },
         ],
-        "clarification_round": state["clarification_round"] + 1,
+        "clarification_round": (
+            state["clarification_round"] + 1
+        ),
     }
 
 
-def validation_ready(state: AgentState) -> dict:
-    """Placeholder boundary for the validation stage."""
-
-    return {}
-
 def create_checkpointer() -> InMemorySaver:
-    """Create a checkpoint saver with explicitly allowed application types."""
+    """Create a checkpoint saver with allowed application types."""
 
     serializer = JsonPlusSerializer(
         allowed_msgpack_modules=[
@@ -93,25 +99,60 @@ def create_checkpointer() -> InMemorySaver:
             RequirementCategory,
             CoverageAssessment,
             CoverageStatus,
+            ValidationIssue,
+            ValidationIssueType,
         ]
     )
 
     return InMemorySaver(serde=serializer)
 
 
+def route_after_validation(
+    state: AgentState,
+) -> Literal["collect_clarification", "end"]:
+    """Route based on validation results."""
+
+    if state["validation_passed"]:
+        return "end"
+
+    if (
+        state["clarification_round"]
+        >= state["max_clarification_rounds"]
+    ):
+        return "end"
+
+    return "collect_clarification"
+
+
 def build_graph(
     analyzer: Callable[[AgentState], dict] = analyze_requirements,
+    validator: Callable[[AgentState], dict] = validate_requirements,
 ):
     """Build the requirements-collection LangGraph."""
 
     builder = StateGraph(AgentState)
 
-    builder.add_node("analyze_requirements", analyzer)
-    builder.add_node("assess_completeness", assess_completeness)
-    builder.add_node("collect_clarification", collect_clarification)
-    builder.add_node("validation_ready", validation_ready)
+    builder.add_node(
+        "analyze_requirements",
+        analyzer,
+    )
+    builder.add_node(
+        "assess_completeness",
+        assess_completeness,
+    )
+    builder.add_node(
+        "collect_clarification",
+        collect_clarification,
+    )
+    builder.add_node(
+        "validate_requirements",
+        validator,
+    )
 
-    builder.add_edge(START, "analyze_requirements")
+    builder.add_edge(
+        START,
+        "analyze_requirements",
+    )
 
     builder.add_edge(
         "analyze_requirements",
@@ -123,7 +164,16 @@ def build_graph(
         route_after_completeness,
         {
             "collect_clarification": "collect_clarification",
-            "validation_ready": "validation_ready",
+            "validation_ready": "validate_requirements",
+        },
+    )
+
+    builder.add_conditional_edges(
+        "validate_requirements",
+        route_after_validation,
+        {
+            "collect_clarification": "collect_clarification",
+            "end": END,
         },
     )
 
@@ -132,11 +182,6 @@ def build_graph(
         "analyze_requirements",
     )
 
-    builder.add_edge(
-        "validation_ready",
-        END,
-    )
-
     return builder.compile(
-    checkpointer=create_checkpointer()
-)
+        checkpointer=create_checkpointer()
+    )
